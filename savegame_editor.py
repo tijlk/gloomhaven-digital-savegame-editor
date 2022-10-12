@@ -1,6 +1,8 @@
 import re
 from datetime import datetime
 import struct
+from IPython.display import display
+import pandas as pd
 
 
 class SaveGameEditor:
@@ -51,7 +53,7 @@ class SaveGameEditor:
     def prettify_events(events):
         return " ".join([e.decode("utf-8") for e in events])
 
-    def print_events_info(self, event=None):
+    def show_events_info(self, event=None):
         self.read_events()
         if event == "city" or event is None:
             print(f"{self.n_city_events} City Events:")
@@ -158,9 +160,27 @@ class SaveGameEditor:
             pass
 
         self.txt = self.replace_substring_inplace(self.txt, new_events_txt, (events_start_index, discard_end_index))
-        self.print_events_info(event=event)
+        self.show_events_info(event=event)
 
-    def update_char_values(self, char_name="Sol Goodman", gold=None, exp=None, perk_points=None, perk_checks=None):
+    def show_character_info(self, characters=None):
+        char_info = []
+        if characters:
+            for char in characters:
+                gold, exp, level, perks, checks = self.update_char_values(char_name=char, verbose=False)
+                char_info.append({
+                    "name": char,
+                    "gold": gold,
+                    "level": level,
+                    "experience": exp,
+                    "perk points available": perks,
+                    "perk checks": checks
+                })
+        print("\nInfo about current characters:")
+        display(pd.DataFrame(char_info).sort_values(by="experience", ascending=False))
+
+    def update_char_values(
+        self, char_name="Sol Goodman", gold=None, exp=None, perk_points=None, perk_checks=None, verbose=True
+    ):
         char_info_span = re.search(bytes(char_name, "utf-8") + b'(?s:.)*?ID(.*)\n\n', self.txt).span(1)
         gold_span = (char_info_span[0], char_info_span[0] + 4)
         exp_span = (char_info_span[0] + 4, char_info_span[0] + 8)
@@ -176,30 +196,41 @@ class SaveGameEditor:
             new_gold_str = struct.pack('<I', gold)
             self.txt = self.replace_substring_inplace(self.txt, new_gold_str, gold_span)
             new_gold = struct.unpack("<I", self.txt[gold_span[0]:gold_span[1]])[0]
-            print(f"{char_name}'s gold amount was updated from {current_gold} to {new_gold}.")
-        else:
+            if verbose:
+                print(f"{char_name}'s gold amount was updated from {current_gold} to {new_gold}.")
+        elif verbose:
             print(f"{char_name} currently has {current_gold} gold.")
         if exp is not None:
             new_exp_str = struct.pack('<I', exp)
             self.txt = self.replace_substring_inplace(self.txt, new_exp_str, exp_span)
             new_exp = struct.unpack("<I", self.txt[exp_span[0]:exp_span[1]])[0]
-            print(f"{char_name}'s experience was updated from {current_exp} (level {current_level}) to {new_exp}.")
-        else:
+            if verbose:
+                print(f"{char_name}'s experience was updated from {current_exp} (level {current_level}) to {new_exp}.")
+        elif verbose:
             print(f"{char_name} currently is level {current_level} with {current_exp} experience.")
         if perk_points is not None:
             new_perks_str = struct.pack('<I', perk_points)
             self.txt = self.replace_substring_inplace(self.txt, new_perks_str, perk_points_span)
             new_perk_points = struct.unpack("<I", self.txt[perk_points_span[0]:perk_points_span[1]])[0]
-            print(f"{char_name}'s available perk points was updated from {current_perk_points} to {new_perk_points}.")
-        else:
+            if verbose:
+                print(f"{char_name}'s available perk points was updated from {current_perk_points} to {new_perk_points}.")
+        elif verbose:
             print(f"{char_name} currently has {current_perk_points} available perk points.")
         if perk_checks is not None:
             perk_checks_str = struct.pack('<I', perk_checks)
             self.txt = self.replace_substring_inplace(self.txt, perk_checks_str, perk_checks_span)
             new_perk_checks = struct.unpack("<I", self.txt[perk_checks_span[0]:perk_checks_span[1]])[0]
-            print(f"{char_name}'s available perk checks was updated from {current_perk_checks} to {new_perk_checks}.")
-        else:
+            if verbose:
+                print(f"{char_name}'s available perk checks was updated from {current_perk_checks} to {new_perk_checks}.")
+        elif verbose:
             print(f"{char_name} currently has {current_perk_checks} available perk checks.")
+        return (
+            gold or current_gold,
+            exp or current_exp,
+            current_level,
+            perk_points or current_perk_points,
+            perk_checks or current_perk_checks
+        )
 
     def toggle_scenario_unlock(self, scenario=1, unlock=None):
         scenario_span = re.search(
@@ -251,6 +282,10 @@ class SaveGameEditor:
             if (len(v) > 0 and k != "Locked") or verbose:
                 print(f"    {k}: {' '.join([str(s) for s in v])}")
 
+
+    def show_campaign_info(self):
+        self.update_campaign_values()
+
     def update_campaign_values(self, donated=None, prosperity=None, reputation=None):
         donated_span = re.search(b"GoldDonated", self.txt).span()
         donated_gold_span = (donated_span[1] + 6, donated_span[1] + 10)
@@ -263,7 +298,7 @@ class SaveGameEditor:
                 f" gold to {donated} gold."
             )
         else:
-            print(f"\nThere was {current_gold_donated:,} gold donated to the tree so far.")
+            print(f"\nGold donated to the tree so far: {current_gold_donated:,}")
 
         campaign_span = list(
             re.finditer(b"MapRuleLibrary\.Party\.CMapCharacter.*?\\t(.*?)\\t", self.txt)
@@ -275,7 +310,7 @@ class SaveGameEditor:
             self.txt = self.replace_substring_inplace(self.txt, new_prosperity_str, prosperity_span)
             print(f"Prosperity was updated from {current_prosperity} to {prosperity}.")
         else:
-            print(f"Prosperity is currently at {current_prosperity}.")
+            print(f"Current prosperity: {current_prosperity}")
 
         reputation_span = (campaign_span[0] + 8, campaign_span[1])
         current_reputation = struct.unpack("<I", self.txt[reputation_span[0]:reputation_span[1]])[0]
@@ -284,4 +319,4 @@ class SaveGameEditor:
             self.txt = self.replace_substring_inplace(self.txt, new_reputation_str, reputation_span)
             print(f"Reputation was updated from {current_reputation} to {reputation}.")
         else:
-            print(f"Reputation is currently at {current_reputation}.")
+            print(f"Current reputation: {current_reputation}")
