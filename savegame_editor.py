@@ -4,6 +4,29 @@ import struct
 from IPython.display import display
 import pandas as pd
 
+RECORDTYPEENUM = {
+    'SerializedStreamHeader': 0,
+    'ClassWithId': 1,
+    'SystemClassWithMembers': 2,
+    'ClassWithMembers': 3,
+    'SystemClassWithMembersAndTypes': 4,
+    'ClassWithMembersAndTypes': 5,
+    'BinaryObjectString': 6,
+    'BinaryArray': 7,
+    'MemberPrimitiveTyped': 8,
+    'MemberReference': 9,
+    'ObjectNull': 10,
+    'MessageEnd': 11,
+    'BinaryLibrary': 12,
+    'ObjectNullMultiple256': 13,
+    'ObjectNullMultiple': 14,
+    'ArraySinglePrimitive': 15,
+    'ArraySingleObject': 16,
+    'ArraySingleString': 17,
+    'ArrayOfType': 18,
+    'MethodCall': 19,
+    'MethodReturn': 20
+}
 
 class SaveGameEditor:
     def __init__(self, ext=".dat", root_dir=None, campaign=None):
@@ -320,3 +343,142 @@ class SaveGameEditor:
             print(f"Reputation was updated from {current_reputation} to {reputation}.")
         else:
             print(f"Current reputation: {current_reputation}")
+
+    def dat_to_json(self):
+        try:
+            import netfleece
+        except Exception:
+            raise Exception("A required package (netfleece) could not be imported.\nThis package unfortunately doesn't"
+                            "work in Python 3.9 and above.\nPlease try again in a Python 3.8 environment!")
+        with open(self.file, 'rb') as infile:
+            self.json = netfleece.parseloop(infile)
+
+    def show_personal_quests(self):
+        self.prioritise_personal_quests()
+
+    def remove_personal_quests(self, quests_to_remove=None):
+        if quests_to_remove is None:
+            self.show_personal_quests()
+            return
+        quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str = self.read_personal_quest_deck()
+        quests_to_remove_bytes = [str.encode(s) for s in quests_to_remove]
+        for quest in quests_to_remove_bytes:
+            if quest in quests_dict.keys():
+                quests_dict.pop(quest)
+            else:
+                print(f"Quest {quest.decode('utf-8')} was not found in the quest deck!")
+        self.recreate_personal_quest_deck(quests_dict, pq_deck_obj_str, pq_deck_span)
+
+    def read_personal_quest_deck(self):
+        pq_deck_path = self.get_paths_to_value(self.json, "PersonalQuestDeck")[
+            0]  # [[0, 5, 'ClassInfo', 'MemberNames', 6, 'PersonalQuestDeck']]
+        pq_deck_idref1 = self.json[pq_deck_path[0]][pq_deck_path[1]]["Values"][pq_deck_path[4]]["IdRef"]  # 38
+        pq_deck_idref2 = self.get_obj_value(self.json, pq_deck_idref1)["Values"][0]["IdRef"]  # 94
+        pq_deck_objectid = self.get_obj_value(self.json, pq_deck_idref2)["Values"][0]["IdRef"]  # 1334
+        pq_deck_recordtype = RECORDTYPEENUM[self.get_obj_value(self.json, 1334)["RecordTypeEnum"]]
+        pq_deck_obj_str = pq_deck_recordtype.to_bytes(1, "little") + struct.pack("<I", pq_deck_objectid)
+        pq_deck_span = re.search(pq_deck_obj_str + b".{4}(\x06.{5}[A-Za-z_]*)*(\\n|\\r.)?", self.txt).span()
+        pq_deck_str = self.txt[pq_deck_span[0]:pq_deck_span[1]]
+        quests = [m for m in re.finditer(b"(\x06.{4}.(PERSONALQUEST|PersonalQuest).*?)(?=\x06|$|\\n|\\r)", pq_deck_str)]
+        quests_dict = {quest.group()[20:]:
+            {
+                "object_id": quest.group()[1:5],
+                "length": len(quest.group()[6:]),
+                "quest_str": quest.group()[6:]
+            } for quest in quests
+        }
+        return quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str
+
+    def recreate_personal_quest_deck(self, quests_dict, pq_deck_obj_str, pq_deck_span):
+        deck_length = 25
+        new_pq_deck_str = pq_deck_obj_str + struct.pack("<I", deck_length)
+        for quest, quest_info in quests_dict.items():
+            new_pq_deck_str += b"\x06" + quest_info["object_id"] \
+                               + quest_info["length"].to_bytes(1, "little") + quest_info["quest_str"]
+        nulls_to_add = deck_length - len(quests_dict)
+        if nulls_to_add < 0:
+            raise Exception("There are more quests in the deck than allowed!")
+        elif nulls_to_add == 0:
+            pass
+        elif nulls_to_add == 1:
+            new_pq_deck_str += RECORDTYPEENUM["ObjectNull"].to_bytes(1, "little")
+        elif nulls_to_add > 1:
+            new_pq_deck_str += RECORDTYPEENUM["ObjectNullMultiple256"].to_bytes(1, "little") \
+                               + nulls_to_add.to_bytes(1, "little")
+        self.txt = self.replace_substring_inplace(self.txt, new_pq_deck_str, pq_deck_span)
+        print("New personal quest deck order:")
+        for quest in quests_dict:
+            print(f"    {quest.decode('utf-8')}")
+
+    def prioritise_personal_quests(self, prioritize=None):
+        if not hasattr(self, "json"):
+            self.dat_to_json()
+
+        quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str = self.read_personal_quest_deck()
+        if prioritize is None:
+            print("\nCurrent personal quest deck order:")
+            for quest, _ in quests_dict.items():
+                print(f"    {quest.decode('utf-8')}")
+            return
+
+        prioritize_bytes = [str.encode(s) for s in prioritize]
+        current_order = list(quests_dict.keys())
+        new_order = []
+        for quest in prioritize_bytes:
+            if quest in current_order:
+                current_order.remove(quest)
+            else:
+                raise Exception(f"The quest '{quest.decode('utf-8')}' isn't currently in the deck! Maybe a typo?")
+            new_order.append(current_order.pop(0))
+            new_order.append(quest)
+        new_order.extend(current_order)
+        quests_dict = {quest: quests_dict[quest] for quest in new_order}
+        self.recreate_personal_quest_deck(quests_dict, pq_deck_obj_str, pq_deck_span)
+
+    def breadcrumb_finder(self, json_dict_or_list, value, path, result):
+        """
+        This recursive function is able to parse through a nested JSON dictionary or list to find all occurences of
+        a given value and return their "paths" in the JSON object
+        See https://stackoverflow.com/a/69537980/3112000
+        :param json_dict_or_list: JSON dict or list to parse through
+        :param value: value that we're looking for
+        :param path: current path that we're looking at
+        :param result: list of all the paths found so far
+        :return: nothing as the results list is edited in-place
+        """
+        if json_dict_or_list == value:
+            path.append(json_dict_or_list)
+            result.append(path.copy())
+            path.pop()
+        elif isinstance(json_dict_or_list, dict):
+            for k, v in json_dict_or_list.items():
+                path.append(k)
+                child = self.breadcrumb_finder(v, value, path, result)
+                path.pop()
+
+        elif isinstance(json_dict_or_list, list):
+            lst = json_dict_or_list
+            for i in range(len(lst)):
+                path.append(i)
+                child = self.breadcrumb_finder(lst[i], value, path, result)
+                path.pop()
+
+    def get_paths_to_value(self, data, value):
+        results = []
+        self.breadcrumb_finder(data, value, [], results)
+        return results
+
+    def get_paths_to_key_value(self, data, key, value):
+        results = []
+        self.breadcrumb_finder(data, value, [], results)
+        return [r for r in results if r[-2:] == [key, value]]
+
+    def get_obj_value(self, data, objectid):
+        path = self.get_paths_to_key_value(data, "ObjectId", objectid)[0]
+        return data[path[0]][path[1]]
+    # TODO:
+    # * method to change character's name
+    # * method to respec a character's ability cards (https://docs.google.com/spreadsheets/d/1ZNVpFGDavZQ7kIHGzodXDLw-xSRCiabz1FkoJ-Aoqc0/edit#gid=1707295556)
+    # * method to show a character's available abilities and selected abilities
+    # * method to change and reorder the personal quest deck
+    # * method to complete a quest with the relevant characters
