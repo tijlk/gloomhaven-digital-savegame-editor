@@ -10,8 +10,8 @@ class SaveGameEditor:
         self.root_dir = root_dir
         self.campaign = campaign
         self.file = f"{self.root_dir}/{self.campaign}/{self.campaign}{ext}"
-        self.read_savegame()
-        self.save_backup_savegame()
+        self._read_savegame()
+        self._save_backup_savegame()
         self.scenario_state_dict = {
             0: "None",
             1: "Locked",
@@ -45,12 +45,12 @@ class SaveGameEditor:
             "MethodReturn": 20,
         }
 
-    def save_backup_savegame(self):
+    def _save_backup_savegame(self):
         now_str = datetime.now().strftime("%Y%m%d-%H%M%S")
         with open(f"{self.file}-backup-{now_str}", "wb") as f:
             f.write(self.txt)
 
-    def read_savegame(self):
+    def _read_savegame(self):
         with open(self.file, "rb") as f:
             self.txt = f.read()
 
@@ -58,7 +58,7 @@ class SaveGameEditor:
         with open(self.file, "wb") as f:
             f.write(self.txt)
 
-    def read_events(self):
+    def _read_events(self):
         res = re.search(b"(?s)_City_Campaign_[a-zA-Z0-9]*ID(?!.{6}E)", self.txt)
         city_pattern = b"Event_City_Campaign_([a-zA-Z0-9]*)ID"
         self.city_events = [n for n in re.findall(city_pattern, self.txt[: res.span()[1]])]
@@ -69,28 +69,28 @@ class SaveGameEditor:
         self.n_road_events = len(self.road_events)
 
     @staticmethod
-    def replace_substring_inplace(txt, substr, span):
+    def _replace_substring_inplace(txt, substr, span):
         return txt[: span[0]] + substr + txt[span[1] :]
 
     @staticmethod
-    def prettify_events(events):
+    def _prettify_events(events):
         return " ".join([e.decode("utf-8") for e in events])
 
     def show_events_info(self, event=None):
-        self.read_events()
+        self._read_events()
         if event == "city" or event is None:
             print(f"{self.n_city_events} City Events:")
-            print(f"Current order: {self.prettify_events(self.city_events)}")
-            print(f"Sorted: {self.prettify_events(sorted(self.city_events))}")
+            print(f"Current order: {self._prettify_events(self.city_events)}")
+            print(f"Sorted: {self._prettify_events(sorted(self.city_events))}")
         if event is None:
             print("")
         if event == "road" or event is None:
             print(f"{self.n_road_events} Road Events:")
-            print(f"Current order: {self.prettify_events(self.road_events)}")
-            print(f"Sorted: {self.prettify_events(sorted(self.road_events))}")
+            print(f"Current order: {self._prettify_events(self.road_events)}")
+            print(f"Sorted: {self._prettify_events(sorted(self.road_events))}")
 
     @staticmethod
-    def get_events_span(events_txt, event="city"):
+    def _get_events_span(events_txt, event="city"):
         event_capital = b"City" if event == "city" else b"Road"
         return [
             {"event_number": int(re.search(b"_([0-9]*)ID", e.group()).group(1)), "event_span": e.span()}
@@ -98,7 +98,7 @@ class SaveGameEditor:
         ]
 
     @staticmethod
-    def next_power_of_2(x, min_power=2):
+    def _next_power_of_2(x, min_power=2):
         return max(2**min_power, 1 if x == 0 else 2 ** (x - 1).bit_length())
 
     def replace_events(self, event="city", new_events=None, verbose=True):
@@ -128,7 +128,7 @@ class SaveGameEditor:
 
         # Create the new events txt
         # define the length of the array in which to store the events, which should be a power of 2
-        array_length = self.next_power_of_2(n_events)  # define the length of the a
+        array_length = self._next_power_of_2(n_events)  # define the length of the a
         new_events_txt = struct.pack("<I", array_length)  # the length of the array in little endian
 
         # Create string excluding ID
@@ -186,7 +186,7 @@ class SaveGameEditor:
             # If there is no discard deck, we're finished
             pass
 
-        self.txt = self.replace_substring_inplace(self.txt, new_events_txt, (events_start_index, discard_end_index))
+        self.txt = self._replace_substring_inplace(self.txt, new_events_txt, (events_start_index, discard_end_index))
         self.show_events_info(event=event)
 
     def show_character_info(self, characters=None):
@@ -232,7 +232,7 @@ class SaveGameEditor:
         current_perk_checks = struct.unpack("<I", self.txt[perk_checks_span[0] : perk_checks_span[1]])[0]
         if gold is not None:
             new_gold_str = struct.pack("<I", gold)
-            self.txt = self.replace_substring_inplace(self.txt, new_gold_str, gold_span)
+            self.txt = self._replace_substring_inplace(self.txt, new_gold_str, gold_span)
             new_gold = struct.unpack("<I", self.txt[gold_span[0] : gold_span[1]])[0]
             if verbose:
                 print(f"{char_name}'s gold amount was updated from {current_gold} to {new_gold}.")
@@ -240,7 +240,7 @@ class SaveGameEditor:
             print(f"{char_name} currently has {current_gold} gold.")
         if exp is not None:
             new_exp_str = struct.pack("<I", exp)
-            self.txt = self.replace_substring_inplace(self.txt, new_exp_str, exp_span)
+            self.txt = self._replace_substring_inplace(self.txt, new_exp_str, exp_span)
             new_exp = struct.unpack("<I", self.txt[exp_span[0] : exp_span[1]])[0]
             if verbose:
                 print(f"{char_name}'s experience was updated from {current_exp} (level {current_level}) to {new_exp}.")
@@ -248,7 +248,7 @@ class SaveGameEditor:
             print(f"{char_name} currently is level {current_level} with {current_exp} experience.")
         if perk_points is not None:
             new_perks_str = struct.pack("<I", perk_points)
-            self.txt = self.replace_substring_inplace(self.txt, new_perks_str, perk_points_span)
+            self.txt = self._replace_substring_inplace(self.txt, new_perks_str, perk_points_span)
             new_perk_points = struct.unpack("<I", self.txt[perk_points_span[0] : perk_points_span[1]])[0]
             if verbose:
                 print(
@@ -258,7 +258,7 @@ class SaveGameEditor:
             print(f"{char_name} currently has {current_perk_points} available perk points.")
         if perk_checks is not None:
             perk_checks_str = struct.pack("<I", perk_checks)
-            self.txt = self.replace_substring_inplace(self.txt, perk_checks_str, perk_checks_span)
+            self.txt = self._replace_substring_inplace(self.txt, perk_checks_str, perk_checks_span)
             new_perk_checks = struct.unpack("<I", self.txt[perk_checks_span[0] : perk_checks_span[1]])[0]
             if verbose:
                 print(
@@ -287,7 +287,7 @@ class SaveGameEditor:
                 else:
                     new_scenario_state_str = struct.pack("<I", 1)
                 scenario_state_span = (scenario_span[1] - 4, scenario_span[1])
-                self.txt = self.replace_substring_inplace(self.txt, new_scenario_state_str, scenario_state_span)
+                self.txt = self._replace_substring_inplace(self.txt, new_scenario_state_str, scenario_state_span)
                 new_scenario_state = struct.unpack("<I", self.txt[scenario_span[1] - 4 : scenario_span[1]])[0]
                 cur_state = self.scenario_state_dict[current_scenario_state]
                 new_state = self.scenario_state_dict[new_scenario_state]
@@ -334,7 +334,7 @@ class SaveGameEditor:
         current_gold_donated = struct.unpack("<I", self.txt[donated_gold_span[0] : donated_gold_span[1]])[0]
         if donated is not None:
             new_gold_donated_str = struct.pack("<I", donated)
-            self.txt = self.replace_substring_inplace(self.txt, new_gold_donated_str, donated_gold_span)
+            self.txt = self._replace_substring_inplace(self.txt, new_gold_donated_str, donated_gold_span)
             print(
                 f"The total gold donated to the tree was updated from {current_gold_donated:,}"
                 f" gold to {donated} gold."
@@ -347,7 +347,7 @@ class SaveGameEditor:
         current_prosperity = struct.unpack("<I", self.txt[prosperity_span[0] : prosperity_span[1]])[0]
         if prosperity is not None:
             new_prosperity_str = struct.pack("<I", prosperity)
-            self.txt = self.replace_substring_inplace(self.txt, new_prosperity_str, prosperity_span)
+            self.txt = self._replace_substring_inplace(self.txt, new_prosperity_str, prosperity_span)
             print(f"Prosperity was updated from {current_prosperity} to {prosperity}.")
         else:
             print(f"Current prosperity: {current_prosperity}")
@@ -356,16 +356,18 @@ class SaveGameEditor:
         current_reputation = struct.unpack("<I", self.txt[reputation_span[0] : reputation_span[1]])[0]
         if reputation is not None:
             new_reputation_str = struct.pack("<I", reputation)
-            self.txt = self.replace_substring_inplace(self.txt, new_reputation_str, reputation_span)
+            self.txt = self._replace_substring_inplace(self.txt, new_reputation_str, reputation_span)
             print(f"Reputation was updated from {current_reputation} to {reputation}.")
         else:
             print(f"Current reputation: {current_reputation}")
 
-    def dat_to_json(self):
+    def _dat_to_json(self):
         try:
             import netfleece
         except ModuleNotFoundError:
-            raise Exception("You need to install the netfleece package with `pip install netfleece` to use this method.")
+            raise Exception(
+                "You need to install the netfleece package with `pip install netfleece` to use this method."
+            )
         except Exception:
             raise Exception(
                 "A required package (netfleece) could not be imported.\nThis package unfortunately doesn't "
@@ -381,23 +383,23 @@ class SaveGameEditor:
         if quests_to_remove is None:
             self.show_personal_quests()
             return
-        quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str = self.read_personal_quest_deck()
+        quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str = self._read_personal_quest_deck()
         quests_to_remove_bytes = [str.encode(s) for s in quests_to_remove]
         for quest in quests_to_remove_bytes:
             if quest in quests_dict.keys():
                 quests_dict.pop(quest)
             else:
                 print(f"Quest {quest.decode('utf-8')} was not found in the quest deck!")
-        self.recreate_personal_quest_deck(quests_dict, pq_deck_obj_str, pq_deck_span)
+        self._recreate_personal_quest_deck(quests_dict, pq_deck_obj_str, pq_deck_span)
 
-    def read_personal_quest_deck(self):
-        pq_deck_path = self.get_paths_to_value(self.json, "PersonalQuestDeck")[
+    def _read_personal_quest_deck(self):
+        pq_deck_path = self._get_paths_to_value(self.json, "PersonalQuestDeck")[
             0
         ]  # [[0, 5, 'ClassInfo', 'MemberNames', 6, 'PersonalQuestDeck']]
         pq_deck_idref1 = self.json[pq_deck_path[0]][pq_deck_path[1]]["Values"][pq_deck_path[4]]["IdRef"]  # 38
-        pq_deck_idref2 = self.get_obj_value(self.json, pq_deck_idref1)["Values"][0]["IdRef"]  # 94
-        pq_deck_objectid = self.get_obj_value(self.json, pq_deck_idref2)["Values"][0]["IdRef"]  # 1334
-        pq_deck_recordtype = self.recordtype_enum[self.get_obj_value(self.json, 1334)["RecordTypeEnum"]]
+        pq_deck_idref2 = self._get_obj_value(self.json, pq_deck_idref1)["Values"][0]["IdRef"]  # 94
+        pq_deck_objectid = self._get_obj_value(self.json, pq_deck_idref2)["Values"][0]["IdRef"]  # 1334
+        pq_deck_recordtype = self.recordtype_enum[self._get_obj_value(self.json, 1334)["RecordTypeEnum"]]
         pq_deck_obj_str = pq_deck_recordtype.to_bytes(1, "little") + struct.pack("<I", pq_deck_objectid)
         pq_deck_span = re.search(pq_deck_obj_str + b".{4}(\x06.{5}[A-Za-z_]*)*(\\n|\\r.)?", self.txt).span()
         pq_deck_str = self.txt[pq_deck_span[0] : pq_deck_span[1]]
@@ -412,7 +414,7 @@ class SaveGameEditor:
         }
         return quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str
 
-    def recreate_personal_quest_deck(self, quests_dict, pq_deck_obj_str, pq_deck_span):
+    def _recreate_personal_quest_deck(self, quests_dict, pq_deck_obj_str, pq_deck_span):
         deck_length = 25
         new_pq_deck_str = pq_deck_obj_str + struct.pack("<I", deck_length)
         for quest, quest_info in quests_dict.items():
@@ -430,16 +432,16 @@ class SaveGameEditor:
             new_pq_deck_str += self.recordtype_enum["ObjectNullMultiple256"].to_bytes(
                 1, "little"
             ) + nulls_to_add.to_bytes(1, "little")
-        self.txt = self.replace_substring_inplace(self.txt, new_pq_deck_str, pq_deck_span)
+        self.txt = self._replace_substring_inplace(self.txt, new_pq_deck_str, pq_deck_span)
         print("New personal quest deck order:")
         for quest in quests_dict:
             print(f"    {quest.decode('utf-8')}")
 
     def prioritise_personal_quests(self, prioritize=None):
         if not hasattr(self, "json"):
-            self.dat_to_json()
+            self._dat_to_json()
 
-        quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str = self.read_personal_quest_deck()
+        quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str = self._read_personal_quest_deck()
         if prioritize is None:
             print("\nCurrent personal quest deck order:")
             for quest, _ in quests_dict.items():
@@ -458,9 +460,9 @@ class SaveGameEditor:
             new_order.append(quest)
         new_order.extend(current_order)
         quests_dict = {quest: quests_dict[quest] for quest in new_order}
-        self.recreate_personal_quest_deck(quests_dict, pq_deck_obj_str, pq_deck_span)
+        self._recreate_personal_quest_deck(quests_dict, pq_deck_obj_str, pq_deck_span)
 
-    def breadcrumb_finder(self, json_dict_or_list, value, path, result):
+    def _breadcrumb_finder(self, json_dict_or_list, value, path, result):
         """
         This recursive function is able to parse through a nested JSON dictionary or list to find all occurences of
         a given value and return their "paths" in the JSON object
@@ -478,28 +480,28 @@ class SaveGameEditor:
         elif isinstance(json_dict_or_list, dict):
             for k, v in json_dict_or_list.items():
                 path.append(k)
-                child = self.breadcrumb_finder(v, value, path, result)
+                self._breadcrumb_finder(v, value, path, result)
                 path.pop()
 
         elif isinstance(json_dict_or_list, list):
             lst = json_dict_or_list
             for i in range(len(lst)):
                 path.append(i)
-                child = self.breadcrumb_finder(lst[i], value, path, result)
+                self._breadcrumb_finder(lst[i], value, path, result)
                 path.pop()
 
-    def get_paths_to_value(self, data, value):
+    def _get_paths_to_value(self, data, value):
         results = []
-        self.breadcrumb_finder(data, value, [], results)
+        self._breadcrumb_finder(data, value, [], results)
         return results
 
-    def get_paths_to_key_value(self, data, key, value):
+    def _get_paths_to_key_value(self, data, key, value):
         results = []
-        self.breadcrumb_finder(data, value, [], results)
+        self._breadcrumb_finder(data, value, [], results)
         return [r for r in results if r[-2:] == [key, value]]
 
-    def get_obj_value(self, data, objectid):
-        path = self.get_paths_to_key_value(data, "ObjectId", objectid)[0]
+    def _get_obj_value(self, data, objectid):
+        path = self._get_paths_to_key_value(data, "ObjectId", objectid)[0]
         return data[path[0]][path[1]]
 
     # TODO:
