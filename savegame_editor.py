@@ -364,9 +364,11 @@ class SaveGameEditor:
     def dat_to_json(self):
         try:
             import netfleece
+        except ModuleNotFoundError:
+            raise Exception("You need to install the netfleece package with `pip install netfleece` to use this method.")
         except Exception:
             raise Exception(
-                "A required package (netfleece) could not be imported.\nThis package unfortunately doesn't"
+                "A required package (netfleece) could not be imported.\nThis package unfortunately doesn't "
                 "work in Python 3.9 and above.\nPlease try again in a Python 3.8 environment!"
             )
         with open(self.file, "rb") as infile:
