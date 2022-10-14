@@ -12,6 +12,7 @@ class SaveGameEditor:
         self.file = f"{self.root_dir}/{self.campaign}/{self.campaign}{ext}"
         self._read_savegame()
         self._save_backup_savegame()
+        self._dat_to_json()
         self.scenario_state_dict = {
             0: "None",
             1: "Locked",
@@ -393,17 +394,15 @@ class SaveGameEditor:
         self._recreate_personal_quest_deck(quests_dict, pq_deck_obj_str, pq_deck_span)
 
     def _read_personal_quest_deck(self):
-        pq_deck_path = self._get_paths_to_value(self.json, "PersonalQuestDeck")[
-            0
-        ]  # [[0, 5, 'ClassInfo', 'MemberNames', 6, 'PersonalQuestDeck']]
-        pq_deck_idref1 = self.json[pq_deck_path[0]][pq_deck_path[1]]["Values"][pq_deck_path[4]]["IdRef"]  # 38
-        pq_deck_idref2 = self._get_obj_value(self.json, pq_deck_idref1)["Values"][0]["IdRef"]  # 94
-        pq_deck_objectid = self._get_obj_value(self.json, pq_deck_idref2)["Values"][0]["IdRef"]  # 1334
-        pq_deck_recordtype = self.recordtype_enum[self._get_obj_value(self.json, 1334)["RecordTypeEnum"]]
+        pq_deck_path = self._get_paths_to_value(self.json, "PersonalQuestDeck")[0]
+        pq_deck_idref1 = self.json[pq_deck_path[0]][pq_deck_path[1]]["Values"][pq_deck_path[4]]["IdRef"]
+        pq_deck_idref2 = self._get_obj_value(self.json, pq_deck_idref1)["Values"][0]["IdRef"]
+        pq_deck_objectid = self._get_obj_value(self.json, pq_deck_idref2)["Values"][0]["IdRef"]
+        pq_deck_recordtype = self.recordtype_enum[self._get_obj_value(self.json, pq_deck_objectid)["RecordTypeEnum"]]
         pq_deck_obj_str = pq_deck_recordtype.to_bytes(1, "little") + struct.pack("<I", pq_deck_objectid)
         pq_deck_span = re.search(pq_deck_obj_str + b".{4}(\x06.{5}[A-Za-z_]*)*(\\n|\\r.)?", self.txt).span()
         pq_deck_str = self.txt[pq_deck_span[0] : pq_deck_span[1]]
-        quests = [m for m in re.finditer(b"(\x06.{4}.(PERSONALQUEST|PersonalQuest).*?)(?=\x06|$|\\n|\\r)", pq_deck_str)]
+        quests = list(re.finditer(b"(\x06.{4}.(PERSONALQUEST|PersonalQuest).*?)(?=\x06|$|\\n|\\r)", pq_deck_str))
         quests_dict = {
             quest.group()[20:]: {
                 "object_id": quest.group()[1:5],
@@ -438,9 +437,6 @@ class SaveGameEditor:
             print(f"    {quest.decode('utf-8')}")
 
     def prioritise_personal_quests(self, prioritize=None):
-        if not hasattr(self, "json"):
-            self._dat_to_json()
-
         quests_dict, pq_deck_obj_str, pq_deck_span, pq_deck_str = self._read_personal_quest_deck()
         if prioritize is None:
             print("\nCurrent personal quest deck order:")
@@ -461,6 +457,52 @@ class SaveGameEditor:
         new_order.extend(current_order)
         quests_dict = {quest: quests_dict[quest] for quest in new_order}
         self._recreate_personal_quest_deck(quests_dict, pq_deck_obj_str, pq_deck_span)
+
+    def _read_chest_deck(self):
+        self._get_paths_to_value(self.json, "AlreadyRewardedChestTreasureTableIDs")
+        chests_path = self._get_paths_to_value(self.json, "AlreadyRewardedChestTreasureTableIDs")[0]
+        chests_idref = self.json[chests_path[0]][chests_path[1]]["Values"][chests_path[4]]["IdRef"]
+        chests_objectid = self._get_obj_value(self.json, chests_idref)["Values"][0]["IdRef"]
+        chests_recordtype = self.recordtype_enum[self._get_obj_value(self.json, chests_objectid)["RecordTypeEnum"]]
+        chests_obj_str = chests_recordtype.to_bytes(1, "little") + struct.pack("<I", chests_objectid)
+        chests_span = re.search(chests_obj_str + b".{4}(\x06.{5}[A-Za-z_0-9]*)*(\\n|\\r.)?", self.txt).span()
+        chests_deck_str = self.txt[chests_span[0]: chests_span[1]]
+        chests_looted = list(re.finditer(b"\x06(.{4}).TT_Campaign_Chest_([0-9]{2})(?=\x06|$|\\n|\\r)", chests_deck_str))
+        chests_dict = {int(chest.group(2)): chest.group(1) for chest in chests_looted}
+        return chests_dict, chests_obj_str, chests_span, chests_deck_str
+
+    def show_looted_chests(self):
+        chests_dict, chests_obj_str, chests_span, chests_deck_str = self._read_chest_deck()
+        looted_chests = [int(chest) for chest in list(chests_dict.keys())]
+        print(f"\nLooted chests: {' '.join([str(c) for c in looted_chests])}")
+
+    def toggle_chests(self, looted=None):
+        chests_dict, chests_obj_str, chests_span, chests_deck_str = self._read_chest_deck()
+        current_looted_chests = [int(chest) for chest in list(chests_dict.keys())]
+        first_chest_object_id = 3000000 # struct.unpack("<I", chests_dict[current_looted_chests[0]])[0]
+        new_looted_chests = sorted(set(current_looted_chests).union(set(looted)))
+        chests_to_be_looted = sorted(set(new_looted_chests).difference(set(current_looted_chests)))
+        print(f"The following chests will now be set to 'looted': {' '.join(str(c) for c in chests_to_be_looted)}")
+        chest_deck_length = self._next_power_of_2(len(new_looted_chests))
+        new_chests_deck_str = chests_obj_str + struct.pack("<I", chest_deck_length)
+        chest_str_length = 20
+        for i, chest in enumerate(new_looted_chests):
+            new_chests_deck_str += b"\x06" + struct.pack("<I", first_chest_object_id + i)
+            new_chests_deck_str += chest_str_length.to_bytes(1, "little")
+            new_chests_deck_str += b"TT_Campaign_Chest_" + bytes(str(chest).zfill(2), "utf-8")
+        nulls_to_add = chest_deck_length - len(new_looted_chests)
+        if nulls_to_add < 0:
+            raise Exception("There are more quests in the deck than allowed!")
+        elif nulls_to_add == 0:
+            pass
+        elif nulls_to_add == 1:
+            new_chests_deck_str += self.recordtype_enum["ObjectNull"].to_bytes(1, "little")
+        elif nulls_to_add > 1:
+            new_chests_deck_str += self.recordtype_enum["ObjectNullMultiple256"].to_bytes(
+                1, "little"
+            ) + nulls_to_add.to_bytes(1, "little")
+        self.txt = self._replace_substring_inplace(self.txt, new_chests_deck_str, chests_span)
+        self.show_looted_chests()
 
     def _breadcrumb_finder(self, json_dict_or_list, value, path, result):
         """
